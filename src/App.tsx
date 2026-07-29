@@ -114,6 +114,62 @@ export default function App() {
     localStorage.setItem(key, val);
     setter(val);
   };
+  // Cargar automáticamente backup.json al iniciar
+React.useEffect(() => {
+  const loadBackup = async () => {
+    try {
+      const response = await fetch('/backups/backup.json');
+
+      if (!response.ok) {
+        console.log('No existe backup automático');
+        return;
+      }
+
+      const backup = await response.json();
+
+      if (backup.teachers) {
+        setTeachers(backup.teachers);
+      }
+
+      if (backup.gallery) {
+        setGallery(backup.gallery);
+      }
+
+      if (backup.subjects) {
+        setSubjects(backup.subjects);
+      }
+
+      if (backup.stories) {
+        setStories(backup.stories);
+      }
+
+      if (backup.honorRoll) {
+        setHonorRoll(backup.honorRoll);
+      }
+
+      if (backup.stats) {
+        setStats(backup.stats);
+      }
+
+      if (backup.notifications) {
+        setNotifications(backup.notifications);
+      }
+
+      if (backup.localStorageData) {
+        Object.entries(backup.localStorageData).forEach(([key, value]) => {
+          localStorage.setItem(key, value as string);
+        });
+      }
+
+      console.log('Backup cargado correctamente');
+
+    } catch (error) {
+      console.error('Error cargando backup:', error);
+    }
+  };
+
+  loadBackup();
+}, []);
 
   // Save changes to localStorage whenever state changes
   React.useEffect(() => {
