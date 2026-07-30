@@ -8,10 +8,12 @@ import {
   INITIAL_HONOR_ROLL,
   INITIAL_COMPANIES,
   INITIAL_STATS,
-  INITIAL_NOTIFICATIONS
+  INITIAL_NOTIFICATIONS,
+  INITIAL_UI,
+  INITIAL_LABS
 } from "../data";
 
-import { Teacher, GalleryItem, Subject, SuccessStory, HonorStudent, PartnerCompany, AppNotification, PortalStats } from "../types";
+import { Teacher, GalleryItem, Subject, SuccessStory, HonorStudent, PartnerCompany, AppNotification, PortalStats, Lab } from "../types";
 
 export type PortalDoc = {
   teachers: Teacher[];
@@ -22,6 +24,8 @@ export type PortalDoc = {
   companies: PartnerCompany[];
   stats: PortalStats;
   notifications: AppNotification[];
+  ui: Record<string, string>;
+  labs: Lab[];
 };
 
 const COLLECTION = "portal";
@@ -39,7 +43,9 @@ export async function loadPortal(): Promise<PortalDoc> {
       honorRoll: INITIAL_HONOR_ROLL,
       companies: INITIAL_COMPANIES,
       stats: INITIAL_STATS,
-      notifications: INITIAL_NOTIFICATIONS
+      notifications: INITIAL_NOTIFICATIONS,
+      ui: INITIAL_UI,
+      labs: INITIAL_LABS
     };
     await setDoc(ref, initial);
     return initial;
@@ -53,7 +59,9 @@ export async function loadPortal(): Promise<PortalDoc> {
     honorRoll: data.honorRoll ?? INITIAL_HONOR_ROLL,
     companies: data.companies ?? INITIAL_COMPANIES,
     stats: data.stats ?? INITIAL_STATS,
-    notifications: data.notifications ?? INITIAL_NOTIFICATIONS
+    notifications: data.notifications ?? INITIAL_NOTIFICATIONS,
+    ui: data.ui ?? INITIAL_UI,
+    labs: data.labs ?? INITIAL_LABS
   };
 
   // If data is empty object, set initial
