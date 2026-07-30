@@ -1,5 +1,5 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "../src/firebase";
+import { db } from "../firebase";
 import {
   INITIAL_TEACHERS,
   INITIAL_GALLERY,
@@ -9,9 +9,9 @@ import {
   INITIAL_COMPANIES,
   INITIAL_STATS,
   INITIAL_NOTIFICATIONS
-} from "../src/data";
+} from "../data";
 
-import { Teacher, GalleryItem, Subject, SuccessStory, HonorStudent, PartnerCompany, AppNotification, PortalStats } from "../src/types";
+import { Teacher, GalleryItem, Subject, SuccessStory, HonorStudent, PartnerCompany, AppNotification, PortalStats } from "../types";
 
 export type PortalDoc = {
   teachers: Teacher[];
@@ -57,7 +57,7 @@ export async function loadPortal(): Promise<PortalDoc> {
   };
 
   // If data is empty object, set initial
-  if (Object.keys(data).length === 0) {
+  if (!data || Object.keys(data).length === 0) {
     await setDoc(ref, merged);
   }
 
