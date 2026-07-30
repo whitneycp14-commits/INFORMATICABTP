@@ -86,3 +86,12 @@ export interface UserSession {
   email: string;
   role: 'admin' | 'student' | 'guest';
 }
+
+// Lab type used in the LandingPage / portal UI
+export interface Lab {
+  id: string;
+  tag: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+}
