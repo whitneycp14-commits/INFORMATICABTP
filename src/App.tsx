@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { loadPortal, savePortal } from './services/portalService';
 
-// Simple debounce
+// Simple debounce hook
 function useDebouncedCallback<T extends (...args: any[]) => any>(fn: T, delay = 1000) {
   const timer = React.useRef<number | undefined>(undefined);
   return useCallback((...args: Parameters<T>) => {
@@ -59,6 +59,7 @@ export default function App() {
     return localStorage.getItem('portal_active_tab') || 'inicio';
   });
 
+  // Portal data (Firestore is the single source of truth)
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -68,33 +69,24 @@ export default function App() {
   const [stats, setStats] = useState<PortalStats>(INITIAL_STATS);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  const [currentUser, setCurrentUser] = useState<UserSession>(() => {
-    const saved = localStorage.getItem('portal_current_user');
-    return saved ? JSON.parse(saved) : { username: 'Invitado', email: '', role: 'guest' };
-  });
+  // Session (explicit only)
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(null);
+  const [isAdminEditing, setIsAdminEditing] = useState<boolean>(false);
 
-  const [isAdminEditing, setIsAdminEditing] = useState<boolean>(() => {
-    return localStorage.getItem('portal_admin_editing') === 'true';
-  });
-
-  // Footer states
-  const [footerHistory, setFooterHistory] = useState<string>(() => {
-    return localStorage.getItem('footer_history') || INSTITUTIONAL_INFO.history;
-  });
-  const [footerAddress, setFooterAddress] = useState<string>(() => {
-    return localStorage.getItem('footer_address') || INSTITUTIONAL_INFO.address;
-  });
-  const [footerPhone, setFooterPhone] = useState<string>(() => {
-    return localStorage.getItem('footer_phone') || INSTITUTIONAL_INFO.phone;
-  });
-  const [footerEmail, setFooterEmail] = useState<string>(() => {
-    return localStorage.getItem('footer_email') || INSTITUTIONAL_INFO.email;
-  });
+  // Footer/local UI states (non-portal editable texts). These could be migrated to Firestore later.
+  const [footerHistory, setFooterHistory] = useState<string>(() => INSTITUTIONAL_INFO.history);
+  const [footerAddress, setFooterAddress] = useState<string>(() => INSTITUTIONAL_INFO.address);
+  const [footerPhone, setFooterPhone] = useState<string>(() => INSTITUTIONAL_INFO.phone);
+  const [footerEmail, setFooterEmail] = useState<string>(() => INSTITUTIONAL_INFO.email);
 
   const saveFooterText = (key: string, setter: (val: string) => void, val: string) => {
+    // Currently kept local (not portal data). In a later step migrate to Firestore.
     localStorage.setItem(key, val);
     setter(val);
   };
+
+  // Hydration guard: prevent writing to Firestore until after initial load from Firestore completes
+  const hasHydratedFromFirestoreRef = React.useRef(false);
 
   // Load portal from Firestore on mount
   useEffect(() => {
@@ -122,12 +114,15 @@ export default function App() {
         setCompanies(INITIAL_COMPANIES);
         setStats(INITIAL_STATS);
         setNotifications(INITIAL_NOTIFICATIONS);
+      } finally {
+        hasHydratedFromFirestoreRef.current = true;
       }
     })();
 
     return () => { mounted = false; };
   }, []);
 
+  // Debounced save to Firestore (only after hydration)
   const debouncedSave = useDebouncedCallback(async (portal: any) => {
     try {
       await savePortal(portal);
@@ -136,108 +131,79 @@ export default function App() {
     }
   }, 1000);
 
-  // Save to Firestore when main states change
+  // Save to Firestore when main states change, but only after hydration
   useEffect(() => {
+    if (!hasHydratedFromFirestoreRef.current) return;
     const portal = { teachers, gallery, subjects, stories, honorRoll, companies, stats, notifications };
     debouncedSave(portal);
   }, [teachers, gallery, subjects, stories, honorRoll, companies, stats, notifications, debouncedSave]);
 
-  // localStorage for secondary states
+  // Persist activeTab only (UI preference), but not portal content/session
   useEffect(() => {
     localStorage.setItem('portal_active_tab', activeTab);
   }, [activeTab]);
 
-  useEffect(() => {
-    localStorage.setItem('portal_current_user', JSON.stringify(currentUser));
-    if (currentUser.role !== 'admin') {
-      setIsAdminEditing(false);
-      localStorage.setItem('portal_admin_editing', 'false');
-    }
-  }, [currentUser]);
+  // NOTE: we intentionally DO NOT persist currentUser or isAdminEditing automatically.
 
-  useEffect(() => {
-    localStorage.setItem('portal_admin_editing', String(isAdminEditing));
-  }, [isAdminEditing]);
+  // Helper guest fallback
+  const GUEST_USER: UserSession = { username: 'Invitado', email: '', role: 'guest' };
 
+  // Session management (explicit only)
   const handleLogin = (username: string, role: 'admin' | 'student') => {
-    setCurrentUser({ username, email: role === 'admin' ? 'admin@cemgalvarocontreras.edu.hn' : `${username.toLowerCase().replace(/\s+/g, '')}@cemgalvarocontreras.edu.hn`, role });
+    // Replace with real auth when available
+    const user: UserSession = {
+      username,
+      email: role === 'admin' ? 'admin@cemgalvarocontreras.edu.hn' : `${username.toLowerCase().replace(/\s+/g, '')}@cemgalvarocontreras.edu.hn`,
+      role
+    };
+    setCurrentUser(user);
     setActiveTab('inicio');
   };
 
   const handleLogout = () => {
     if (confirm('¿Está seguro de que desea cerrar sesión en el portal?')) {
-      setCurrentUser({ username: 'Invitado', email: '', role: 'guest' });
+      setCurrentUser(null);
       setIsAdminEditing(false);
       setActiveTab('inicio');
     }
   };
 
+  // Reset to defaults and persist to Firestore
   const handleResetDefaults = async () => {
-    if (confirm('¿Está seguro de que desea restablecer todos los textos e imágenes del portal a su estado original? Sus cambios inline se perderán.')) {
-      // Do not clear localStorage entirely: preserve the three keys
-      const preserved = {
-        portal_active_tab: localStorage.getItem('portal_active_tab'),
-        portal_current_user: localStorage.getItem('portal_current_user'),
-        portal_admin_editing: localStorage.getItem('portal_admin_editing')
-      };
-
-      // Reset states
-      setTeachers(INITIAL_TEACHERS);
-      setGallery(INITIAL_GALLERY);
-      setSubjects(INITIAL_SUBJECTS);
-      setStories(INITIAL_SUCCESS_STORIES);
-      setHonorRoll(INITIAL_HONOR_ROLL);
-      setCompanies(INITIAL_COMPANIES);
-      setStats(INITIAL_STATS);
-      setNotifications(INITIAL_NOTIFICATIONS);
-      setCurrentUser({ username: 'Invitado', email: '', role: 'guest' });
+    if (!confirm('¿Está seguro de que desea restablecer todos los textos e imágenes del portal a su estado original? Sus cambios inline se perderán.')) return;
+    const initial = {
+      teachers: INITIAL_TEACHERS,
+      gallery: INITIAL_GALLERY,
+      subjects: INITIAL_SUBJECTS,
+      stories: INITIAL_SUCCESS_STORIES,
+      honorRoll: INITIAL_HONOR_ROLL,
+      companies: INITIAL_COMPANIES,
+      stats: INITIAL_STATS,
+      notifications: INITIAL_NOTIFICATIONS
+    };
+    try {
+      await savePortal(initial);
+      setTeachers(initial.teachers);
+      setGallery(initial.gallery);
+      setSubjects(initial.subjects);
+      setStories(initial.stories);
+      setHonorRoll(initial.honorRoll);
+      setCompanies(initial.companies);
+      setStats(initial.stats);
+      setNotifications(initial.notifications);
+      setCurrentUser(null);
       setIsAdminEditing(false);
-      setFooterHistory(INSTITUTIONAL_INFO.history);
-      setFooterAddress(INSTITUTIONAL_INFO.address);
-      setFooterPhone(INSTITUTIONAL_INFO.phone);
-      setFooterEmail(INSTITUTIONAL_INFO.email);
       setActiveTab('inicio');
-
-      // Save to Firestore
-      try {
-        await savePortal({ teachers: INITIAL_TEACHERS, gallery: INITIAL_GALLERY, subjects: INITIAL_SUBJECTS, stories: INITIAL_SUCCESS_STORIES, honorRoll: INITIAL_HONOR_ROLL, companies: INITIAL_COMPANIES, stats: INITIAL_STATS, notifications: INITIAL_NOTIFICATIONS });
-      } catch (err) {
-        console.error('Error saving defaults to Firestore', err);
-      }
-
-      // Restore preserved localStorage keys
-      Object.entries(preserved).forEach(([k, v]) => {
-        if (v === null) localStorage.removeItem(k);
-        else localStorage.setItem(k, v as string);
-      });
-
       alert('Se han restaurado los valores del sistema.');
+    } catch (err) {
+      console.error('Error saving defaults to Firestore', err);
+      alert('Error al restablecer valores.');
     }
   };
 
+  // Export backup JSON (client-side)
   const handleExportData = () => {
-    const localStorageData: Record<string, string> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key && (
-        key.startsWith('portal_') ||
-        key.startsWith('hero_') ||
-        key.startsWith('vision_') ||
-        key.startsWith('career_') ||
-        key.startsWith('profile_') ||
-        key.startsWith('field_') ||
-        key.startsWith('software_') ||
-        key.startsWith('networks_') ||
-        key.startsWith('tech_') ||
-        key.startsWith('innov_') ||
-        key.startsWith('lider_') ||
-        key.startsWith('footer_')
-      )) {
-        localStorageData[key] = localStorage.getItem(key) || '';
-      }
-    }
-
-    const dataSnapshot = { teachers, gallery, subjects, stories, honorRoll, stats, notifications, localStorageData };
+    const dataSnapshot = { teachers, gallery, subjects, stories, honorRoll, stats, notifications };
     const element = document.createElement('a');
     const file = new Blob([JSON.stringify(dataSnapshot, null, 2)], { type: 'application/json' });
     element.href = URL.createObjectURL(file);
@@ -247,6 +213,7 @@ export default function App() {
     document.body.removeChild(element);
   };
 
+  // Import JSON backup and save to Firestore (do not restore session keys)
   const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileReader = new FileReader();
     if (e.target.files && e.target.files[0]) {
@@ -255,8 +222,16 @@ export default function App() {
         try {
           const parsed = JSON.parse(event.target?.result as string);
           if (parsed.teachers && parsed.gallery && parsed.subjects) {
-            // Update Firestore
-            const portal = { teachers: parsed.teachers, gallery: parsed.gallery, subjects: parsed.subjects, stories: parsed.stories ?? [], honorRoll: parsed.honorRoll ?? [], companies: parsed.companies ?? [], stats: parsed.stats ?? INITIAL_STATS, notifications: parsed.notifications ?? [] };
+            const portal = {
+              teachers: parsed.teachers,
+              gallery: parsed.gallery,
+              subjects: parsed.subjects,
+              stories: parsed.stories ?? [],
+              honorRoll: parsed.honorRoll ?? [],
+              companies: parsed.companies ?? [],
+              stats: parsed.stats ?? INITIAL_STATS,
+              notifications: parsed.notifications ?? []
+            };
             try {
               await savePortal(portal);
             } catch (err) {
@@ -264,22 +239,20 @@ export default function App() {
             }
 
             // Update local state
-            setTeachers(parsed.teachers);
-            setGallery(parsed.gallery);
-            setSubjects(parsed.subjects);
-            if (parsed.stories) setStories(parsed.stories);
-            if (parsed.honorRoll) setHonorRoll(parsed.honorRoll);
-            if (parsed.stats) setStats(parsed.stats);
-            if (parsed.notifications) setNotifications(parsed.notifications);
+            setTeachers(portal.teachers);
+            setGallery(portal.gallery);
+            setSubjects(portal.subjects);
+            setStories(portal.stories);
+            setHonorRoll(portal.honorRoll);
+            setCompanies(portal.companies);
+            setStats(portal.stats);
+            setNotifications(portal.notifications);
 
-            // Restore allowed localStorage keys
+            // Do NOT restore session/admin flags from imported localStorageData
+            // Restore only non-sensitive UI keys if absolutely needed (e.g., footer text)
             if (parsed.localStorageData) {
               Object.entries(parsed.localStorageData).forEach(([key, value]) => {
-                if (['portal_active_tab', 'portal_current_user', 'portal_admin_editing'].includes(key)) {
-                  localStorage.setItem(key, value as string);
-                }
-                // keep footer and other UI text in localStorage as before
-                if (key.startsWith('footer_') || key.startsWith('career_') || key.startsWith('profile_') || key.startsWith('field_') || key.startsWith('vision_') || key.startsWith('gallery_') || key.startsWith('thanks_') || key.startsWith('subjects_')) {
+                if (key.startsWith('footer_') || key.startsWith('career_') || key.startsWith('profile_') || key.startsWith('field_') || key.startsWith('vision_')) {
                   localStorage.setItem(key, value as string);
                 }
               });
@@ -301,7 +274,7 @@ export default function App() {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        currentUser={currentUser}
+        currentUser={currentUser ?? GUEST_USER}
         onLogout={handleLogout}
         isAdminEditing={isAdminEditing}
         setIsAdminEditing={setIsAdminEditing}
@@ -332,7 +305,7 @@ export default function App() {
                   gallery={gallery}
                   onUpdateGallery={setGallery}
                   isAdminEditing={isAdminEditing}
-                  currentUserRole={currentUser.role}
+                  currentUserRole={(currentUser ?? GUEST_USER).role}
                 />
               )}
 
@@ -341,7 +314,7 @@ export default function App() {
                   subjects={subjects}
                   onUpdateSubjects={setSubjects}
                   isAdminEditing={isAdminEditing}
-                  currentUserRole={currentUser.role}
+                  currentUserRole={(currentUser ?? GUEST_USER).role}
                 />
               )}
 
@@ -350,8 +323,8 @@ export default function App() {
                   stories={stories}
                   onUpdateStories={setStories}
                   isAdminEditing={isAdminEditing}
-                  currentUserRole={currentUser.role}
-                  currentUsername={currentUser.username}
+                  currentUserRole={(currentUser ?? GUEST_USER).role}
+                  currentUsername={currentUser?.username ?? ''}
                 />
               )}
 
@@ -366,13 +339,13 @@ export default function App() {
                   notifications={notifications}
                   onUpdateNotifications={setNotifications}
                   isAdminEditing={isAdminEditing}
-                  currentUserRole={currentUser.role}
+                  currentUserRole={(currentUser ?? GUEST_USER).role}
                 />
               )}
 
               {activeTab === 'acceso' && (
                 <LoginPage
-                  currentUser={currentUser}
+                  currentUser={currentUser ?? GUEST_USER}
                   onLogin={handleLogin}
                   onLogout={handleLogout}
                 />
@@ -396,11 +369,8 @@ export default function App() {
               </div>
               <div className="flex gap-4">
                 <button
-                  onClick={() => {
-                    setActiveTab('inicio');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center hover:bg-ochre hover:text-primary transition-all shadow-sm border border-white/10 text-white cursor-pointer"
+                  onClick={() => { setActiveTab('inicio'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center hover:bg-ochre hover:text-primary transition-all shadow-sm border border-white/10 text-white"
                   title="Regresar a Inicio"
                 >
                   <Home size={18} />
@@ -453,7 +423,7 @@ export default function App() {
               <p className="text-[11px] text-white/60 leading-relaxed font-sans">Gestione la información, descargue copias de seguridad o restablezca los datos predeterminados sin tocar el código.</p>
 
               <div className="flex flex-col gap-2">
-                {currentUser.role === 'admin' && (
+                {(currentUser?.role ?? 'guest') === 'admin' && (
                   <>
                     <button
                       onClick={handleExportData}
@@ -463,7 +433,7 @@ export default function App() {
                       Exportar Backup JSON
                     </button>
 
-                    <label className="flex items-center justify-center gap-1.5 bg-white/5 hover:bg-white/10 text-white font-mono text-[10px] font-bold py-2 px-3 rounded-lg border border-white/10 cursor-pointer">
+                    <label className="flex items-center justify-center gap-1.5 bg-white/5 hover:bg-white/10 text-white font-mono text-[10px] font-bold py-2 px-3 rounded-lg border border-white/10">
                       <Upload size={12} className="text-ochre" />
                       Importar Backup JSON
                       <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
@@ -471,14 +441,14 @@ export default function App() {
 
                     <button
                       onClick={handleResetDefaults}
-                      className="flex items-center justify-center gap-1.5 bg-red-950/20 hover:bg-red-950/45 text-red-300 font-mono text-[10px] font-bold py-2 px-3 rounded-lg border border-red-500/20"
+                      className="flex items-center justify-center gap-1.5 bg-red-950/20 hover:bg-red-950/45 text-red-300 font-mono text-[10px] font-bold py-2 px-3 rounded-lg border border-red-500"
                     >
                       <Undo size={12} />
                       Restablecer Portal
                     </button>
                   </>
                 )}
-                {currentUser.role !== 'admin' && (
+                {(currentUser?.role ?? 'guest') !== 'admin' && (
                   <p className="text-[10px] text-white/45 italic leading-tight">Inicie sesión como administrador para acceder a las opciones de copia de seguridad y restauración del portal.</p>
                 )}
               </div>
