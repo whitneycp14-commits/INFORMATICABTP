@@ -35,7 +35,7 @@ export async function loadPortal(): Promise<PortalDoc> {
   const ref = doc(db, COLLECTION, DOC);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
-    const initial = {
+    const initial: PortalDoc = {
       teachers: INITIAL_TEACHERS,
       gallery: INITIAL_GALLERY,
       subjects: INITIAL_SUBJECTS,
@@ -44,7 +44,7 @@ export async function loadPortal(): Promise<PortalDoc> {
       companies: INITIAL_COMPANIES,
       stats: INITIAL_STATS,
       notifications: INITIAL_NOTIFICATIONS,
-      ui: INITIAL_UI,
+      ui: INITIAL_UI as Record<string,string>,
       labs: INITIAL_LABS
     };
     await setDoc(ref, initial);
@@ -60,7 +60,7 @@ export async function loadPortal(): Promise<PortalDoc> {
     companies: data.companies ?? INITIAL_COMPANIES,
     stats: data.stats ?? INITIAL_STATS,
     notifications: data.notifications ?? INITIAL_NOTIFICATIONS,
-    ui: data.ui ?? INITIAL_UI,
+    ui: data.ui ?? (INITIAL_UI as Record<string,string>),
     labs: data.labs ?? INITIAL_LABS
   };
 
