@@ -48,6 +48,8 @@ export interface GalleryItem {
   date: string;
   description: string;
   imageUrl: string;
+  mediaType?: 'image' | 'video';
+  videoUrl?: string;
 }
 
 export interface HonorStudent {
@@ -84,5 +86,5 @@ export interface PortalStats {
 export interface UserSession {
   username: string;
   email: string;
-  role: 'admin' | 'student' | 'guest';
+  role: 'admin' | 'editor' | 'guest';
 }

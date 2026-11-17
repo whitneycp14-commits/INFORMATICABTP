@@ -30,7 +30,7 @@ interface ThanksPageProps {
   notifications: AppNotification[];
   onUpdateNotifications: (notes: AppNotification[]) => void;
   isAdminEditing: boolean;
-  currentUserRole: 'admin' | 'student' | 'guest';
+  currentUserRole: 'admin' | 'editor' | 'guest';
 }
 
 export default function ThanksPage({

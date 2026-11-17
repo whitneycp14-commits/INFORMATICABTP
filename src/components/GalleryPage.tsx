@@ -14,14 +14,26 @@ import {
 } from 'lucide-react';
 import { GalleryItem } from '../types';
 import AdminEditOverlay, { QuickEditText } from './AdminEditOverlay';
-import { cleanImageUrl } from '../utils';
+import { cleanImageUrl, saveVideoFile, resolveVideoUrl } from '../utils';
 import ImageUploadInput from './ImageUploadInput';
+
+function isEmbedVideo(url: string): boolean {
+  return /(?:youtube\.com|youtu\.be|vimeo\.com)/i.test(url);
+}
+
+function toEmbedUrl(url: string): string {
+  const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([\w-]{11})/);
+  if (yt) return `https://www.youtube-nocookie.com/embed/${yt[1]}`;
+  const vimeo = url.match(/vimeo\.com\/(\d+)/);
+  if (vimeo) return `https://player.vimeo.com/video/${vimeo[1]}`;
+  return url;
+}
 
 interface GalleryPageProps {
   gallery: GalleryItem[];
   onUpdateGallery: (items: GalleryItem[]) => void;
   isAdminEditing: boolean;
-  currentUserRole: 'admin' | 'student' | 'guest';
+  currentUserRole: 'admin' | 'editor' | 'guest';
 }
 
 export default function GalleryPage({
@@ -53,7 +65,19 @@ export default function GalleryPage({
   const [formCategory, setFormCategory] = React.useState<GalleryItem['category']>('Laboratorios');
   const [formDescription, setFormDescription] = React.useState('');
   const [formImageUrl, setFormImageUrl] = React.useState('');
+  const [formMediaType, setFormMediaType] = React.useState<'image' | 'video'>('image');
+  const [formVideoUrl, setFormVideoUrl] = React.useState('');
+  const [formVideoFile, setFormVideoFile] = React.useState<File | null>(null);
+  const [resolvedVideos, setResolvedVideos] = React.useState<Record<string, string>>({});
   const [formDate, setFormDate] = React.useState('');
+
+  React.useEffect(() => {
+    let active = true;
+    Promise.all(gallery.filter(item => item.mediaType === 'video' && item.videoUrl).map(async item => [item.id, await resolveVideoUrl(item.videoUrl!)] as const))
+      .then(entries => { if (active) setResolvedVideos(Object.fromEntries(entries)); })
+      .catch(error => console.error('No se pudieron cargar algunos videos:', error));
+    return () => { active = false; };
+  }, [gallery]);
 
   const categories: string[] = ['Todos', 'Laboratorios', 'Mantenimiento', 'Redes', 'Desarrollo Web', 'Producciones Digitales', 'Eventos'];
 
@@ -67,6 +91,9 @@ export default function GalleryPage({
     setFormCategory('Laboratorios');
     setFormDescription('');
     setFormImageUrl('');
+    setFormMediaType('image');
+    setFormVideoUrl('');
+    setFormVideoFile(null);
     setFormDate(new Date().toISOString().split('T')[0]);
   };
 
@@ -75,15 +102,25 @@ export default function GalleryPage({
     setFormTitle(item.title);
     setFormCategory(item.category);
     setFormDescription(item.description);
-    setFormImageUrl(item.imageUrl);
+    setFormImageUrl(item.imageUrl || '');
+    setFormMediaType(item.mediaType || 'image');
+    setFormVideoUrl(item.videoUrl?.startsWith('idb://') ? '' : (item.videoUrl || ''));
+    setFormVideoFile(null);
     setFormDate(item.date);
   };
 
-  const handleSaveItem = () => {
-    if (!formTitle || !formDescription || !formImageUrl || !formDate) {
+  const handleSaveItem = async () => {
+    if (!formTitle || !formDescription || !formDate || (formMediaType === 'image' && !formImageUrl) || (formMediaType === 'video' && !formVideoUrl && !formVideoFile && !editingItem?.videoUrl)) {
       alert('Por favor, complete todos los campos obligatorios.');
       return;
     }
+
+    let savedVideoUrl = formVideoUrl.trim();
+    if (formMediaType === 'video' && formVideoFile) {
+      try { savedVideoUrl = await saveVideoFile(formVideoFile); }
+      catch { alert('No se pudo guardar el video. Compruebe el espacio disponible en este navegador.'); return; }
+    }
+    if (formMediaType === 'video' && !savedVideoUrl && editingItem?.videoUrl) savedVideoUrl = editingItem.videoUrl;
 
     if (editingItem) {
       // Edit existing
@@ -92,7 +129,9 @@ export default function GalleryPage({
         title: formTitle,
         category: formCategory,
         description: formDescription,
-        imageUrl: cleanImageUrl(formImageUrl),
+        imageUrl: formMediaType === 'image' ? cleanImageUrl(formImageUrl) : '',
+        mediaType: formMediaType,
+        videoUrl: formMediaType === 'video' ? savedVideoUrl : undefined,
         date: formDate
       } : item);
       onUpdateGallery(updated);
@@ -104,7 +143,9 @@ export default function GalleryPage({
         title: formTitle,
         category: formCategory,
         description: formDescription,
-        imageUrl: cleanImageUrl(formImageUrl),
+        imageUrl: formMediaType === 'image' ? cleanImageUrl(formImageUrl) : '',
+        mediaType: formMediaType,
+        videoUrl: formMediaType === 'video' ? savedVideoUrl : undefined,
         date: formDate
       };
       onUpdateGallery([newItem, ...gallery]);
@@ -143,13 +184,13 @@ export default function GalleryPage({
             </p>
           </div>
           
-          {(currentUserRole === 'admin' || isAdminEditing) && (
+          {(currentUserRole !== 'guest' || isAdminEditing) && (
             <button 
               onClick={startUpload}
               className="bg-secondary hover:bg-secondary/90 text-white py-3 px-6 rounded-lg flex items-center gap-2 transition-all font-display font-bold text-sm shadow-md cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
             >
               <Upload size={16} />
-              Subir Nueva Imagen
+              Agregar Foto o Video
             </button>
           )}
         </div>
@@ -186,13 +227,13 @@ export default function GalleryPage({
         {filteredGallery.length === 0 ? (
           <div className="text-center py-20 bg-white border border-dashed border-outline-variant rounded-2xl p-8 max-w-md mx-auto">
             <ImageIcon size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-sm font-bold text-primary mb-1">No hay imágenes en esta categoría</p>
+            <p className="text-sm font-bold text-primary mb-1">No hay contenido en esta categoría</p>
             <p className="text-xs text-on-surface-variant leading-relaxed">
-              {currentUserRole === 'admin' 
+              {currentUserRole !== 'guest' 
                 ? 'Comience subiendo su primera foto técnica para mostrar en el catálogo.' 
                 : 'Vuelva más tarde para ver nuevos registros de esta sección.'}
             </p>
-            {(currentUserRole === 'admin' || isAdminEditing) && (
+            {(currentUserRole !== 'guest' || isAdminEditing) && (
               <button 
                 onClick={startUpload}
                 className="mt-4 bg-primary text-white text-xs font-bold py-2 px-4 rounded-lg hover:opacity-90 inline-flex items-center gap-1.5"
@@ -216,12 +257,12 @@ export default function GalleryPage({
                   onClick={() => setViewingItem(item)}
                   className="relative overflow-hidden aspect-video bg-surface-container cursor-pointer group/img"
                 >
-                  <img 
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-105" 
-                    alt={item.title} 
-                    src={cleanImageUrl(item.imageUrl)}
-                    referrerPolicy="no-referrer"
-                  />
+                  {item.mediaType === 'video' ? (
+                    <div className="w-full h-full bg-slate-950 flex items-center justify-center relative">
+                      {resolvedVideos[item.id] && !isEmbedVideo(resolvedVideos[item.id]) ? <video src={resolvedVideos[item.id]} className="w-full h-full object-cover" muted playsInline preload="metadata" /> : <span className="text-white text-sm font-semibold">▶ Reproducir video</span>}
+                      <span className="absolute bottom-3 right-3 bg-black/70 text-white text-[10px] px-2 py-1 rounded-full">VIDEO</span>
+                    </div>
+                  ) : <img className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-105" alt={item.title} src={cleanImageUrl(item.imageUrl)} referrerPolicy="no-referrer" />}
                   
                   <div className="absolute top-3 left-3 bg-primary text-white text-[9px] font-mono font-bold px-2.5 py-1 rounded uppercase tracking-wider shadow-sm">
                     {item.category}
@@ -283,12 +324,9 @@ export default function GalleryPage({
             </button>
             
             <div className="aspect-video relative bg-black flex items-center justify-center">
-              <img 
-                src={cleanImageUrl(viewingItem.imageUrl)} 
-                alt={viewingItem.title} 
-                className="max-h-full max-w-full object-contain"
-                referrerPolicy="no-referrer"
-              />
+              {viewingItem.mediaType === 'video' ? (
+                resolvedVideos[viewingItem.id] && !isEmbedVideo(resolvedVideos[viewingItem.id]) ? <video src={resolvedVideos[viewingItem.id]} controls autoPlay className="w-full max-h-full" /> : <iframe src={toEmbedUrl(viewingItem.videoUrl || '')} title={viewingItem.title} className="w-full h-full" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
+              ) : <img src={cleanImageUrl(viewingItem.imageUrl)} alt={viewingItem.title} className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />}
               <div className="absolute top-4 left-4 bg-secondary text-white text-[10px] font-mono font-bold px-3 py-1 rounded shadow-md uppercase">
                 {viewingItem.category}
               </div>
@@ -318,7 +356,7 @@ export default function GalleryPage({
             <div className="bg-primary text-white p-6">
               <h3 className="font-display font-bold text-lg flex items-center gap-2">
                 <Sparkles size={20} className="text-ochre" />
-                {editingItem ? 'Editar Registro de Galería' : 'Subir Nueva Imagen al Catálogo'}
+                {editingItem ? 'Editar Registro de Galería' : 'Agregar Foto o Video al Catálogo'}
               </h3>
               <p className="text-xs text-white/70 mt-1">Suministre información técnica detallada para el portafolio público.</p>
             </div>
@@ -360,14 +398,19 @@ export default function GalleryPage({
                 </div>
               </div>
 
-              <div>
-                <ImageUploadInput
-                  value={formImageUrl}
-                  onChange={setFormImageUrl}
-                  label="Imagen de la Actividad *"
-                  placeholder="Pegue un enlace o suba un archivo..."
-                  helpText="Soporta arrastrar imágenes o elegir archivos PNG, JPG, WebP."
-                />
+              <div className="space-y-3 rounded-xl border border-slate-200 p-4 bg-slate-50">
+                <label className="block text-xs font-bold text-slate-600">Tipo de contenido</label>
+                <select value={formMediaType} onChange={e => setFormMediaType(e.target.value as 'image' | 'video')} className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm">
+                  <option value="image">Imagen</option><option value="video">Video</option>
+                </select>
+                {formMediaType === 'image' ? <ImageUploadInput value={formImageUrl} onChange={setFormImageUrl} label="Imagen de la actividad *" placeholder="Pegue un enlace o suba un archivo..." helpText="PNG, JPG o WebP. Puedes agregar tantas imágenes como necesites." /> : <>
+                  <label className="block text-xs font-bold text-slate-600">Enlace de video (MP4, YouTube o Vimeo)</label>
+                  <input type="url" value={formVideoUrl} onChange={e=>setFormVideoUrl(e.target.value)} placeholder="https://..." className="w-full p-2.5 bg-white border border-slate-200 rounded-lg text-sm" />
+                  <div className="text-center text-xs text-slate-400 font-semibold">O selecciona un archivo de video</div>
+                  <input type="file" accept="video/*" onChange={e=>setFormVideoFile(e.target.files?.[0] || null)} className="w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-blue-900 file:px-3 file:py-2 file:text-white" />
+                  {formVideoFile && <p className="text-xs text-emerald-700">Seleccionado: {formVideoFile.name}</p>}
+                  <p className="text-[11px] text-slate-500">Los videos subidos como archivo se guardan en el almacenamiento local del navegador. Para videos grandes o para compartirlos entre dispositivos, utiliza un enlace público MP4/YouTube/Vimeo.</p>
+                </>}
               </div>
 
               <div>

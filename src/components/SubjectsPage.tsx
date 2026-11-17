@@ -18,7 +18,7 @@ interface SubjectsPageProps {
   subjects: Subject[];
   onUpdateSubjects: (subjects: Subject[]) => void;
   isAdminEditing: boolean;
-  currentUserRole: 'admin' | 'student' | 'guest';
+  currentUserRole: 'admin' | 'editor' | 'guest';
 }
 
 export default function SubjectsPage({
@@ -160,7 +160,7 @@ export default function SubjectsPage({
             </p>
           </div>
           
-          {(currentUserRole === 'admin' || isAdminEditing) && (
+          {(currentUserRole !== 'guest' || isAdminEditing) && (
             <button 
               onClick={startAddSubject}
               className="bg-secondary hover:bg-secondary/90 text-white font-display font-bold py-3.5 px-6 rounded-lg flex items-center gap-2 cursor-pointer transition-all shadow-md hover:-translate-y-0.5"

@@ -47,3 +47,15 @@ body {
   break-inside: avoid;
   margin-bottom: 1.5rem;
 }
+
+
+/* Acabado visual unificado del portal */
+:root { color-scheme: light; }
+html { scroll-behavior: smooth; }
+body { min-width: 320px; -webkit-font-smoothing: antialiased; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button { transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(59,130,246,.35); outline-offset: 2px; }
+::selection { background: rgba(59,130,246,.2); }
+.gallery-card, .masonry-item { border-radius: 1rem; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }

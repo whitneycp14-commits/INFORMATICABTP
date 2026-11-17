@@ -67,7 +67,7 @@ export default function Sidebar({
         </div>
         
         <div className="flex items-center gap-3">
-          {currentUser.role === 'admin' && (
+          {currentUser.role !== 'guest' && (
             <button
               onClick={() => setIsAdminEditing(!isAdminEditing)}
               className={`p-1.5 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
@@ -149,7 +149,7 @@ export default function Sidebar({
                     </div>
                     <div className="truncate">
                       <p className="font-bold text-xs text-white truncate leading-tight">{currentUser.username}</p>
-                      <p className="text-[9px] text-white/50 capitalize mt-0.5">{currentUser.role === 'admin' ? 'Administrador 💻' : 'Estudiante 🎓'}</p>
+                      <p className="text-[9px] text-white/50 capitalize mt-0.5">{currentUser.role === 'admin' ? 'Administrador' : 'Editor'}</p>
                     </div>
                   </div>
                   <button
@@ -239,11 +239,11 @@ export default function Sidebar({
 
         {/* Right side controls / user info */}
         <div className="flex items-center gap-4">
-          {currentUser.role === 'admin' && (
+          {currentUser.role !== 'guest' && (
             <div className="flex items-center gap-2.5 bg-secondary border border-white/20 px-3 py-1.5 rounded-lg">
               <span className="text-[10px] font-bold text-white flex items-center gap-1">
                 <ShieldAlert size={12} />
-                Modo Admin
+                Modo Editor
               </span>
               <button
                 onClick={() => setIsAdminEditing(!isAdminEditing)}
@@ -266,7 +266,7 @@ export default function Sidebar({
                 </div>
                 <div className="max-w-[120px] truncate leading-none">
                   <p className="font-bold text-xs text-white truncate">{currentUser.username}</p>
-                  <p className="text-[9px] text-white/50 font-mono uppercase mt-0.5">{currentUser.role === 'admin' ? 'Admin 💻' : 'Estudiante 🎓'}</p>
+                  <p className="text-[9px] text-white/50 font-mono uppercase mt-0.5">{currentUser.role === 'admin' ? 'Administrador' : 'Editor'}</p>
                 </div>
               </div>
               <button

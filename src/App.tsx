@@ -24,6 +24,7 @@ import {
 } from './types';
 import Sidebar from './components/Sidebar';
 import { QuickEditText } from './components/AdminEditOverlay';
+import { loadPortalCollection, savePortalCollection } from './utils';
 import LandingPage from './components/LandingPage';
 import GalleryPage from './components/GalleryPage';
 import SubjectsPage from './components/SubjectsPage';
@@ -87,14 +88,9 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
   });
 
-  const [currentUser, setCurrentUser] = React.useState<UserSession>(() => {
-    const saved = localStorage.getItem('portal_current_user');
-    return saved ? JSON.parse(saved) : { username: 'Invitado', email: '', role: 'guest' };
-  });
-
-  const [isAdminEditing, setIsAdminEditing] = React.useState<boolean>(() => {
-    return localStorage.getItem('portal_admin_editing') === 'true';
-  });
+  const [currentUser, setCurrentUser] = React.useState<UserSession>({ username: 'Invitado', email: '', role: 'guest' });
+  const [isAdminEditing, setIsAdminEditing] = React.useState<boolean>(false);
+  const [dataReady, setDataReady] = React.useState(false);
 
   // Editable Footer states
   const [footerHistory, setFooterHistory] = React.useState<string>(() => {
@@ -114,62 +110,59 @@ export default function App() {
     localStorage.setItem(key, val);
     setter(val);
   };
-  // Cargar automáticamente backup.json al iniciar
-React.useEffect(() => {
-  const loadBackup = async () => {
-    try {
-      const response = await fetch('/backups/backup.json');
-
-      if (!response.ok) {
-        console.log('No existe backup automático');
-        return;
+  // Las colecciones grandes se guardan en IndexedDB. Las sesiones nunca se restauran.
+  React.useEffect(() => {
+    let mounted = true;
+    const hydrate = async () => {
+      try {
+        const migrated = localStorage.getItem('portal_data_migrated_v2') === 'true';
+        if (!migrated) {
+          const response = await fetch('/backups/backup.json');
+          if (response.ok) {
+            const backup = await response.json();
+            const collections: Record<string, unknown> = {
+              teachers: backup.teachers, gallery: backup.gallery, subjects: backup.subjects,
+              stories: backup.stories, honorRoll: backup.honorRoll, notifications: backup.notifications
+            };
+            for (const [key, value] of Object.entries(collections)) {
+              if (value !== undefined) await savePortalCollection(key, value);
+            }
+            if (!mounted) return;
+            if (Array.isArray(backup.teachers)) setTeachers(backup.teachers);
+            if (Array.isArray(backup.gallery)) setGallery(backup.gallery);
+            if (Array.isArray(backup.subjects)) setSubjects(backup.subjects);
+            if (Array.isArray(backup.stories)) setStories(backup.stories);
+            if (Array.isArray(backup.honorRoll)) setHonorRoll(backup.honorRoll);
+            if (backup.stats) setStats(backup.stats);
+            if (Array.isArray(backup.notifications)) setNotifications(backup.notifications);
+            // Nunca importar localStorageData: puede contener una sesión privilegiada antigua.
+            localStorage.setItem('portal_data_migrated_v2', 'true');
+          }
+        } else {
+          const [savedTeachers, savedGallery, savedSubjects, savedStories, savedHonor, savedNotifications] = await Promise.all([
+            loadPortalCollection<Teacher[]>('teachers'), loadPortalCollection<GalleryItem[]>('gallery'),
+            loadPortalCollection<Subject[]>('subjects'), loadPortalCollection<SuccessStory[]>('stories'),
+            loadPortalCollection<HonorStudent[]>('honorRoll'), loadPortalCollection<AppNotification[]>('notifications')
+          ]);
+          if (!mounted) return;
+          if (savedTeachers) setTeachers(savedTeachers);
+          if (savedGallery) setGallery(savedGallery);
+          if (savedSubjects) setSubjects(savedSubjects);
+          if (savedStories) setStories(savedStories);
+          if (savedHonor) setHonorRoll(savedHonor);
+          if (savedNotifications) setNotifications(savedNotifications);
+        }
+      } catch (error) {
+        console.error('No fue posible cargar el contenido local:', error);
+      } finally {
+        if (mounted) setDataReady(true);
       }
-
-      const backup = await response.json();
-
-      if (backup.teachers) {
-        setTeachers(backup.teachers);
-      }
-
-      if (backup.gallery) {
-        setGallery(backup.gallery);
-      }
-
-      if (backup.subjects) {
-        setSubjects(backup.subjects);
-      }
-
-      if (backup.stories) {
-        setStories(backup.stories);
-      }
-
-      if (backup.honorRoll) {
-        setHonorRoll(backup.honorRoll);
-      }
-
-      if (backup.stats) {
-        setStats(backup.stats);
-      }
-
-      if (backup.notifications) {
-        setNotifications(backup.notifications);
-      }
-
-      if (backup.localStorageData) {
-        Object.entries(backup.localStorageData).forEach(([key, value]) => {
-          localStorage.setItem(key, value as string);
-        });
-      }
-
-      console.log('Backup cargado correctamente');
-
-    } catch (error) {
-      console.error('Error cargando backup:', error);
-    }
-  };
-
-  loadBackup();
-}, []);
+    };
+    hydrate();
+    localStorage.removeItem('portal_current_user');
+    localStorage.removeItem('portal_admin_editing');
+    return () => { mounted = false; };
+  }, []);
 
   // Save changes to localStorage whenever state changes
   React.useEffect(() => {
@@ -177,24 +170,24 @@ React.useEffect(() => {
   }, [activeTab]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_teachers', JSON.stringify(teachers));
-  }, [teachers]);
+    if (dataReady) savePortalCollection('teachers', teachers).catch(error => console.error('Error guardando teachers:', error));
+  }, [teachers, dataReady]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_gallery', JSON.stringify(gallery));
-  }, [gallery]);
+    if (dataReady) savePortalCollection('gallery', gallery).catch(error => console.error('Error guardando gallery:', error));
+  }, [gallery, dataReady]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_subjects', JSON.stringify(subjects));
-  }, [subjects]);
+    if (dataReady) savePortalCollection('subjects', subjects).catch(error => console.error('Error guardando subjects:', error));
+  }, [subjects, dataReady]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_stories', JSON.stringify(stories));
-  }, [stories]);
+    if (dataReady) savePortalCollection('stories', stories).catch(error => console.error('Error guardando stories:', error));
+  }, [stories, dataReady]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_honor_roll', JSON.stringify(honorRoll));
-  }, [honorRoll]);
+    if (dataReady) savePortalCollection('honorRoll', honorRoll).catch(error => console.error('Error guardando honorRoll:', error));
+  }, [honorRoll, dataReady]);
 
   React.useEffect(() => {
     localStorage.setItem('portal_companies', JSON.stringify(companies));
@@ -205,28 +198,21 @@ React.useEffect(() => {
   }, [stats]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_notifications', JSON.stringify(notifications));
-  }, [notifications]);
+    if (dataReady) savePortalCollection('notifications', notifications).catch(error => console.error('Error guardando notifications:', error));
+  }, [notifications, dataReady]);
 
   React.useEffect(() => {
-    localStorage.setItem('portal_current_user', JSON.stringify(currentUser));
-    // Disable editing if user is logged out or not admin
-    if (currentUser.role !== 'admin') {
-      setIsAdminEditing(false);
-      localStorage.setItem('portal_admin_editing', 'false');
-    }
+    if (currentUser.role === 'guest') setIsAdminEditing(false);
   }, [currentUser]);
 
-  React.useEffect(() => {
-    localStorage.setItem('portal_admin_editing', String(isAdminEditing));
-  }, [isAdminEditing]);
 
-  const handleLogin = (username: string, role: 'admin' | 'student') => {
+  const handleLogin = (username: string, role: 'admin' | 'editor') => {
     setCurrentUser({
       username,
-      email: role === 'admin' ? 'admin@cemgalvarocontreras.edu.hn' : `${username.toLowerCase().replace(/\s+/g, '')}@cemgalvarocontreras.edu.hn`,
+      email: `${username}@cemgalvarocontreras.edu.hn`,
       role
     });
+    setIsAdminEditing(true);
     // Redirect to home upon successful validation
     setActiveTab('inicio');
   };
@@ -242,6 +228,7 @@ React.useEffect(() => {
   const handleResetDefaults = () => {
     if (confirm('¿Está seguro de que desea restablecer todos los textos e imágenes del portal a su estado original? Sus cambios inline se perderán.')) {
       localStorage.clear();
+      localStorage.setItem('portal_data_migrated_v2', 'true');
       setTeachers(INITIAL_TEACHERS);
       setGallery(INITIAL_GALLERY);
       setSubjects(INITIAL_SUBJECTS);
@@ -323,6 +310,8 @@ React.useEffect(() => {
             // Restore all custom local storage keys
             if (parsed.localStorageData) {
               Object.entries(parsed.localStorageData).forEach(([key, value]) => {
+                // Las colecciones grandes se guardan en IndexedDB y nunca se restauran sesiones.
+                if (['portal_teachers', 'portal_gallery', 'portal_subjects', 'portal_stories', 'portal_honor_roll', 'portal_notifications', 'portal_current_user', 'portal_admin_editing'].includes(key)) return;
                 localStorage.setItem(key, value as string);
               });
             }
@@ -503,7 +492,7 @@ React.useEffect(() => {
               <p className="text-[11px] text-white/60 leading-relaxed font-sans">Gestione la información, descargue copias de seguridad o restablezca los datos predeterminados sin tocar el código.</p>
               
               <div className="flex flex-col gap-2">
-                {currentUser.role === 'admin' && (
+                {currentUser.role !== 'guest' && (
                   <>
                     <button
                       onClick={handleExportData}
@@ -533,7 +522,7 @@ React.useEffect(() => {
                     </button>
                   </>
                 )}
-                {currentUser.role !== 'admin' && (
+                {currentUser.role === 'guest' && (
                   <p className="text-[10px] text-white/45 italic leading-tight">Inicie sesión como administrador para acceder a las opciones de copia de seguridad y restauración del portal.</p>
                 )}
               </div>

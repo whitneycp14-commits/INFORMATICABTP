@@ -22,7 +22,7 @@ interface AlumniPageProps {
   stories: SuccessStory[];
   onUpdateStories: (stories: SuccessStory[]) => void;
   isAdminEditing: boolean;
-  currentUserRole: 'admin' | 'student' | 'guest';
+  currentUserRole: 'admin' | 'editor' | 'guest';
   currentUsername: string;
 }
 
@@ -93,7 +93,7 @@ export default function AlumniPage({
     }
 
     // Auto-approve if user is admin
-    const autoApprove = currentUserRole === 'admin';
+    const autoApprove = currentUserRole !== 'guest';
 
     const newStory: SuccessStory = {
       id: `ss_${Date.now()}`,
@@ -187,7 +187,7 @@ export default function AlumniPage({
       <div className="max-w-7xl mx-auto px-8 py-10 space-y-12">
         
         {/* Pending Stories Section for Administrators */}
-        {currentUserRole === 'admin' && pendingStories.length > 0 && (
+        {currentUserRole !== 'guest' && pendingStories.length > 0 && (
           <section className="bg-red-50 border border-red-200 rounded-xl p-6 shadow-sm">
             <h3 className="font-display font-bold text-lg text-red-900 mb-4 flex items-center gap-2">
               <AlertCircle className="text-red-600" size={20} />

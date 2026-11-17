@@ -72,3 +72,77 @@ export function cleanImageUrl(url: string): string {
 
   return cleaned;
 }
+
+/** Guarda videos en IndexedDB para no llenar el límite reducido de localStorage. */
+export function saveVideoFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('btp-portal-media', 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos');
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const key = `video_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const tx = db.transaction('videos', 'readwrite');
+      tx.objectStore('videos').put(file, key);
+      tx.oncomplete = () => { db.close(); resolve(`idb://${key}`); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+
+export function resolveVideoUrl(value: string): Promise<string> {
+  if (!value.startsWith('idb://')) return Promise.resolve(value);
+  const key = value.slice(6);
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('btp-portal-media', 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('videos')) { db.close(); resolve(''); return; }
+      const get = db.transaction('videos', 'readonly').objectStore('videos').get(key);
+      get.onsuccess = () => {
+        const blob = get.result as Blob | undefined;
+        resolve(blob ? URL.createObjectURL(blob) : '');
+        db.close();
+      };
+      get.onerror = () => { db.close(); reject(get.error); };
+    };
+  });
+}
+
+/** Persistencia de colecciones del portal sin el límite pequeño de localStorage. */
+function openPortalDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('btp-portal-data', 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('collections')) request.result.createObjectStore('collections');
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function savePortalCollection(key: string, value: unknown): Promise<void> {
+  const db = await openPortalDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('collections', 'readwrite');
+    tx.objectStore('collections').put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+export async function loadPortalCollection<T>(key: string): Promise<T | undefined> {
+  const db = await openPortalDatabase();
+  const value = await new Promise<T | undefined>((resolve, reject) => {
+    const request = db.transaction('collections', 'readonly').objectStore('collections').get(key);
+    request.onsuccess = () => resolve(request.result as T | undefined);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return value;
+}
